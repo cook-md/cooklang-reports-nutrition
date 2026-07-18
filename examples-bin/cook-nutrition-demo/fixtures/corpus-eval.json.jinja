@@ -1,0 +1,8 @@
+{#- Emits one JSON row per recipe. `unresolved` names are escaped by hand for \
+    and " because `tojson` is unavailable in this minijinja build; control chars
+    are not escaped, but cooklang ingredient names cannot contain them. -#}
+{%- set il = get_ingredient_list(ingredients, true) -%}
+{%- set agg = aggregate_nutrition(il) -%}
+{%- set m = agg.totals.macros -%}
+{%- set cb = agg.confidence_breakdown -%}
+{"servings": null, "ingredients_listed": {{ il | length }}, "ingredients_resolved": {{ agg["items"] | length }}, "ingredients_failed": {{ agg.failures | length }}, "unresolved": [{% for f in agg.failures %}"{{ f.ingredient | replace('\\', '\\\\') | replace('"', '\\"') }}"{% if not loop.last %}, {% endif %}{% endfor %}], "total": {"kcal": {{ m.kcal }}, "protein_g": {{ m.protein_g }}, "fat_g": {{ m.fat_g }}, "carb_g": {{ m.carb_g }}, "fiber_g": {{ m.fiber_g }}}, "confidence_breakdown": {"confirmed_items": {{ cb.confirmed_items }}, "partial_items": {{ cb.partial_items }}, "estimated_items": {{ cb.estimated_items }}}}

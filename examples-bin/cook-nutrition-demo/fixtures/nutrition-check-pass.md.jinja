@@ -1,0 +1,15 @@
+{%- set checks = namespace(passed=0, failed=0) -%}
+{%- for ingredient in ingredients -%}
+{%- set n = nutrition_for(ingredient) -%}
+{%- if compare(n.protein_g, 30, "gte") -%}
+{%- set checks.passed = checks.passed + 1 -%}
+{{- record_check("protein >= 30g for " ~ ingredient.name, true) -}}
+Protein:  {{ n.protein_g }}g  (target: >= 30g)  PASS
+{% else -%}
+{%- set checks.failed = checks.failed + 1 -%}
+{{- record_check("protein >= 30g for " ~ ingredient.name, false) -}}
+Protein:  {{ n.protein_g }}g  (target: >= 30g)  FAIL
+{% endif -%}
+{%- endfor %}
+Summary: {{ checks.passed }} of {{ checks.passed + checks.failed }} checks passed.
+FAILED: {{ checks.failed }}

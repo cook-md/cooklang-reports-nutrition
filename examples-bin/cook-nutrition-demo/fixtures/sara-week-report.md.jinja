@@ -1,0 +1,58 @@
+{% import "ck" as ck -%}
+# Weekly Dietitian Report — {{ client.name }}
+
+Range: {{ plan.start_date }} – {{ plan.end_date }}
+Days: {{ plan.days | length }}
+Meals: {{ plan.total_meal_count }}
+Unique recipes: {{ plan.unique_recipe_count }}
+
+## Per-day checks
+
+{% for day in plan.days -%}
+### {{ day.date }}
+{% set t = macros(day.ingredients) -%}
+- Energy: {{ t.kcal }} kcal
+- Protein: {{ t.protein_g }} g
+- Saturated fat: {{ t.sat_fat_g }} g
+- Fiber: {{ t.fiber_g }} g
+
+{{ ck.range(t.kcal, client.targets.energy_kcal, day.date ~ " energy") }}
+{{ ck.min(t.protein_g, client.targets.protein_g, day.date ~ " protein") }}
+{{ ck.within(t.sat_fat_g, client.targets.sat_fat_g, day.date ~ " sat fat") }}
+{{ ck.min(t.fiber_g, client.targets.fiber_g, day.date ~ " fiber") }}
+
+{% endfor %}
+## Variety
+
+Omega-3 servings this week: {{ category_servings(plan, "omega3_source") }}
+{{ ck.min(category_servings(plan, "omega3_source"), client.targets.omega3_servings, "omega-3 servings/week") }}
+
+## Weekly exclusions
+
+{{ ck.absent("peanut") }}
+{{ ck.absent("shellfish") }}
+
+## Allergens
+
+{% set alg = aggregate_nutrition(plan.all_ingredients).allergen_summary -%}
+{% if alg -%}
+{% filter trim %}{% include "allergens" %}{% endfilter %}
+{% endif %}
+
+## Confidence
+{% set wk = aggregate_nutrition(plan.all_ingredients) -%}
+Overall confidence: **{{ wk.totals.confidence }}** (weighted: {{ wk.totals.confidence_weighted }})
+{% if wk.confidence_breakdown.estimated_share_of_micronutrients -%}
+Estimated entries affect {{ (wk.confidence_breakdown.estimated_share_of_micronutrients * 100) | round(1) }}% of total micronutrients.
+{%- endif %}
+
+{% set fails = failed_checks() -%}
+{% if fails | length > 0 -%}
+## Concerns
+
+{% for c in fails -%}
+- {{ c.label }}
+{% endfor -%}
+{% else -%}
+All checks passed.
+{% endif %}

@@ -1,0 +1,9 @@
+# Plan check (deliberately failing)
+
+{% set passed = 0 %}
+{% set failed = 0 %}
+{# require more meals than the fixture actually contains #}
+{% if plan.total_meal_count >= 999 %}{% set passed = passed + 1 %}{{ record_check("total meals >= 999", true) }}{% else %}{% set failed = failed + 1 %}{{ record_check("total meals >= 999", false) }}{% endif %}
+
+PASSED: {{ passed }}
+FAILED: {{ failed }}

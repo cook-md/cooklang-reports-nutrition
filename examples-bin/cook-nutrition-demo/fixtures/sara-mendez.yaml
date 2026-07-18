@@ -1,0 +1,10 @@
+name: Sara Mendez
+exclusions: [peanut, shellfish]
+targets:
+  energy_kcal: { min: 1800, max: 2200 }
+  protein_g:   { min: 75 }
+  sodium_mg:   { max: 1500 }
+  sat_fat_g:   { max: 20, tol_pct: 10 }
+  fiber_g:     { min: 25 }
+  iron_mg:     { min: 18 }
+  omega3_servings: { min: 2 }

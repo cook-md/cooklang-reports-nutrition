@@ -1,0 +1,32 @@
+# Nutrition Report
+
+{% set agg = aggregate_nutrition(get_ingredient_list(ingredients, true)) %}
+
+## Macros (total)
+
+| | Amount |
+|---|---|
+| Energy | {{ agg.totals.macros.kcal | round(1) }} kcal |
+| Protein | {{ agg.totals.macros.protein_g | round(1) }} g |
+| Fat | {{ agg.totals.macros.fat_g | round(1) }} g |
+| Carbohydrates | {{ agg.totals.macros.carb_g | round(1) }} g |
+| Fibre | {{ agg.totals.macros.fiber_g | round(1) }} g |
+
+## Confidence
+
+Overall: **{{ agg.totals.confidence }}**
+{% if agg.confidence_breakdown.estimated_share_of_micronutrients %}
+Estimated micronutrient share: {{ (agg.confidence_breakdown.estimated_share_of_micronutrients * 100) | round(1) }}%
+{% endif %}
+{% if agg.confidence_breakdown.estimated_ingredients %}
+Estimated/partial ingredients: {{ agg.confidence_breakdown.estimated_ingredients | join(", ") }}
+{% endif %}
+
+{% if agg.failures %}
+## Unresolved ingredients ({{ agg.failures | length }})
+
+| Ingredient | Reason |
+|---|---|
+{% for f in agg.failures %}| {{ f.ingredient }} | {{ f.error.code }} |
+{% endfor %}
+{% endif %}

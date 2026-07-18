@@ -1,0 +1,14 @@
+# Plan check
+
+Days: {{ plan.days | length }}
+Meals: {{ plan.total_meal_count }}
+Unique recipes: {{ plan.unique_recipe_count }}
+Range: {{ plan.start_date }} – {{ plan.end_date }}
+
+{% set passed = 0 %}
+{% set failed = 0 %}
+{% if plan.total_meal_count >= 2 %}{% set passed = passed + 1 %}{{ record_check("total meals >= 2", true) }}{% else %}{% set failed = failed + 1 %}{{ record_check("total meals >= 2", false) }}{% endif %}
+{% if plan.unique_recipe_count >= 2 %}{% set passed = passed + 1 %}{{ record_check("unique recipes >= 2", true) }}{% else %}{% set failed = failed + 1 %}{{ record_check("unique recipes >= 2", false) }}{% endif %}
+
+PASSED: {{ passed }}
+FAILED: {{ failed }}

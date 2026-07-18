@@ -1,0 +1,43 @@
+{% import "ck" as ck -%}
+# Dietitian Report — {{ client.name }}
+
+## Ingredients
+
+{% for ing in ingredients -%}
+- {{ ing.name }} ({{ ing.quantity.value }}{{ ing.quantity.unit }})
+{% endfor %}
+
+## Totals
+{% set agg = aggregate_nutrition(ingredients) -%}
+{% set t = agg.totals.macros -%}
+| Nutrient | Amount |
+| --- | --- |
+| Energy | {{ t.kcal }} kcal |
+| Protein | {{ t.protein_g }} g |
+| Saturated fat | {{ t.sat_fat_g }} g |
+| Fiber | {{ t.fiber_g }} g |
+
+Confidence: **{{ agg.totals.confidence }}**
+
+## Targets
+
+{{ ck.range(t.kcal, client.targets.energy_kcal, "energy") }}
+{{ ck.min(t.protein_g, client.targets.protein_g, "protein") }}
+{{ ck.within(t.sat_fat_g, client.targets.sat_fat_g, "sat fat") }}
+{{ ck.min(t.fiber_g, client.targets.fiber_g, "fiber") }}
+
+## Exclusions
+
+{{ ck.absent("peanut") }}
+{{ ck.absent("shellfish") }}
+
+{% set fails = failed_checks() -%}
+{% if fails | length > 0 -%}
+## Concerns
+
+{% for c in fails -%}
+- {{ c.label }}
+{% endfor -%}
+{% else -%}
+All checks passed.
+{% endif %}

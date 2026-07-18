@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/cookmd-nutrition-client",
     "crates/cooklang-reports-nutrition",
+    "examples-bin/cook-nutrition-demo",
 ]
 
 [workspace.package]

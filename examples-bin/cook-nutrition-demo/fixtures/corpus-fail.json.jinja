@@ -1,0 +1,4 @@
+{#- Per-recipe failure detail: one row with the failures[] incl. code+message. -#}
+{%- set il = get_ingredient_list(ingredients, true) -%}
+{%- set agg = aggregate_nutrition(il) -%}
+{"listed": {{ il | length }}, "resolved": {{ agg["items"] | length }}, "failures": [{% for f in agg.failures %}{"ing": "{{ f.ingredient | replace('\\', '\\\\') | replace('"', '\\"') }}", "code": "{{ f.error.code }}", "msg": "{{ f.error.message | replace('\\', '\\\\') | replace('"', '\\"') }}"}{% if not loop.last %}, {% endif %}{% endfor %}]}
