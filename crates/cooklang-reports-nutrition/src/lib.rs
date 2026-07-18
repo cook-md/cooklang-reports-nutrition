@@ -1,4 +1,5 @@
-//! Closed-source minijinja extension that registers nutrition_for and compare.
+//! Minijinja extension for cooklang-reports that registers nutrition
+//! functions (`nutrition_for`, `compare`, `total_calories`, ...).
 
 pub mod checks;
 pub mod client;

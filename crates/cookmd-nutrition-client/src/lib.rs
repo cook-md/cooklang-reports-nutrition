@@ -1,4 +1,4 @@
-//! Closed-source HTTP client for the cooklang nutrition service.
+//! HTTP client for the cook.md nutrition service.
 
 use serde::{Deserialize, Serialize};
 
