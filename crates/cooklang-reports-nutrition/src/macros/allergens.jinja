@@ -1,0 +1,14 @@
+{%- if alg.status == "unverified" -%}
+Allergen info unverified
+{%- elif alg.contains -%}
+Contains{% if alg.unverified_ingredients %} at least{% endif %}: {{ alg.contains | map(attribute="label") | join(", ") }}
+{%- elif not alg.unverified_ingredients -%}
+{%- if alg.view == "fda" -%}
+Contains: none of the 9 FDA major allergens identified
+{%- else -%}
+Contains: none of the 14 regulated allergens identified
+{%- endif -%}
+{%- endif %}
+{%- if alg.unverified_ingredients %}
+Allergen info incomplete for: {{ alg.unverified_ingredients | join(", ") }}
+{%- endif -%}

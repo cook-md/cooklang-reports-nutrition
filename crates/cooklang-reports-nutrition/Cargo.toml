@@ -1,0 +1,31 @@
+[package]
+name = "cooklang-reports-nutrition"
+version = "0.1.0"
+description = "Nutrition extension for cooklang-reports: nutrition_for(), aggregate totals, %DV, allergens, and pass/fail checks in jinja recipe reports"
+keywords = ["cooklang", "nutrition", "jinja", "reports"]
+categories = ["template-engine"]
+readme = "../../README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+minijinja = { workspace = true }
+cookmd-nutrition-client = { path = "../cookmd-nutrition-client", version = "0.1.0" }
+cooklang-reports = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+# bundled_units: recipes legitimately use unit'd timers (~{4%hours}); without
+# the bundled unit system Converter::default() knows no units and any such
+# recipe fails plan expansion with "Unknown timer unit".
+cooklang = { workspace = true }
+thiserror = { workspace = true }
+serde_yaml = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+indoc = { workspace = true }

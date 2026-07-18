@@ -1,0 +1,64 @@
+{# Check macros. Auto-registered by NutritionExtension as template "ck".
+   Each macro that records a check calls record_check(label, ok). Macros
+   that find no applicable bound on the target silently no-op. #}
+
+{% macro min(value, target, label="") %}
+{%- set lbl = label if label else "min" -%}
+{%- if target is mapping and target.min is defined and target.min is not none -%}
+{%- set ok = compare(value, target.min, "gte") -%}
+{{- record_check(lbl ~ " >= " ~ target.min, ok) -}}
+{%- endif -%}
+{% endmacro %}
+
+{% macro max(value, target, label="") %}
+{%- set lbl = label if label else "max" -%}
+{%- if target is mapping and target.max is defined and target.max is not none -%}
+{%- set ok = compare(value, target.max, "lte") -%}
+{{- record_check(lbl ~ " <= " ~ target.max, ok) -}}
+{%- endif -%}
+{% endmacro %}
+
+{% macro range(value, target, label="") %}
+{%- set lbl = label if label else "range" -%}
+{%- set has_min = target is mapping and target.min is defined and target.min is not none -%}
+{%- set has_max = target is mapping and target.max is defined and target.max is not none -%}
+{%- if has_min or has_max -%}
+{%- set lo_ok = (not has_min) or compare(value, target.min, "gte") -%}
+{%- set hi_ok = (not has_max) or compare(value, target.max, "lte") -%}
+{%- set ok = lo_ok and hi_ok -%}
+{{- record_check(lbl ~ " in [" ~ (target.min if has_min else "-") ~ ", " ~ (target.max if has_max else "-") ~ "]", ok) -}}
+{%- endif -%}
+{% endmacro %}
+
+{% macro within(value, target, label="") %}
+{%- set lbl = label if label else "within" -%}
+{%- set has_max = target is mapping and target.max is defined and target.max is not none -%}
+{%- set has_tol = target is mapping and target.tol_pct is defined and target.tol_pct is not none -%}
+{%- if has_max and has_tol -%}
+{%- set ok = within_tol(value, target.max, target.tol_pct) -%}
+{{- record_check(lbl ~ " within " ~ target.tol_pct ~ "% of " ~ target.max, ok) -}}
+{%- else -%}
+{{- record_check(lbl ~ " [within: target missing tol_pct]", false) -}}
+{%- endif -%}
+{% endmacro %}
+
+{% macro between(value, lo, hi, label="") %}
+{%- set lbl = label if label else "between" -%}
+{%- set ok = compare(value, lo, "gte") and compare(value, hi, "lte") -%}
+{{- record_check(lbl ~ " in [" ~ lo ~ ", " ~ hi ~ "]", ok) -}}
+{% endmacro %}
+
+{% macro absent(name, label="") %}
+{%- set lbl = label if label else "absent: " ~ name -%}
+{%- set hits = matched_exclusions() -%}
+{%- if name in hits -%}
+{{- record_check(lbl, false) -}}
+{%- else -%}
+{%- set unresolved = unresolved_exclusions() -%}
+{%- if name in unresolved -%}
+{{- record_check(lbl ~ " [unresolved]", false) -}}
+{%- else -%}
+{{- record_check(lbl, true) -}}
+{%- endif -%}
+{%- endif -%}
+{% endmacro %}
