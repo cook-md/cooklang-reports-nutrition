@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cookmd-nutrition-client",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/cook-md/cooklang-reports-nutrition"
+
+[workspace.dependencies]
+anyhow = "1.0"
+thiserror = "2.0"
+tempfile = "3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+tokio = { version = "1.40", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+minijinja = { version = "2.12", features = ["preserve_order", "debug"] }
+cooklang = { version = "0.18", default-features = false, features = ["bundled_units"] }
+cooklang-reports = "0.5.0"
+regex = "1.10"
+indoc = "2"
+wiremock = "0.6"
