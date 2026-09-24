@@ -132,3 +132,64 @@ fn build_plan_records_recursive_recipe_ref_as_missing() {
     assert_eq!(plan.missing_recipes[0].name, "loop_a");
     assert!(plan.missing_recipes[0].error.contains("recursive"));
 }
+
+/// Mass of an expanded ingredient in grams (the converter may refit g → kg).
+fn grams(recipe: &cooklang_reports_nutrition::plan::PlanRecipe, name: &str) -> f64 {
+    let q = recipe
+        .ingredients
+        .iter()
+        .find(|i| i.name == name)
+        .and_then(|i| i.quantity.as_ref())
+        .unwrap_or_else(|| panic!("{name} with quantity"));
+    match q.unit.as_str() {
+        "kg" => q.value * 1000.0,
+        "g" => q.value,
+        other => panic!("unexpected unit {other} for {name}"),
+    }
+}
+
+#[test]
+fn build_plan_servings_ref_scales_to_target_servings() {
+    // `{3%servings}` asks for 3 servings of a 6-serving recipe: factor 0.5,
+    // not a raw ×3 multiplier.
+    let menu = "= Day 1 =\n\nDinner:\n\n@./stew{3%servings}\n";
+    let plan = build_plan_from_source(menu, &fixtures_dir(), None).unwrap();
+    let recipe = &plan.days[0].meals[0].recipes[0];
+    assert_eq!(recipe.scale, 0.5);
+    let beef = recipe
+        .ingredients
+        .iter()
+        .find(|i| i.name == "beef")
+        .expect("beef in expanded stew");
+    let q = beef.quantity.as_ref().expect("beef quantity");
+    assert_eq!(q.value, 600.0);
+    assert_eq!(q.unit, "g");
+}
+
+#[test]
+fn build_plan_bare_number_ref_stays_a_multiplier() {
+    // `{2}` (no unit) is a plain scaling factor even when the recipe declares
+    // servings.
+    let menu = "= Day 1 =\n\nDinner:\n\n@./stew{2}\n";
+    let plan = build_plan_from_source(menu, &fixtures_dir(), None).unwrap();
+    let recipe = &plan.days[0].meals[0].recipes[0];
+    assert_eq!(recipe.scale, 2.0);
+    assert_eq!(grams(recipe, "beef"), 2400.0);
+}
+
+#[test]
+fn build_plan_nested_servings_ref_scales_to_target_servings() {
+    // stew_dinner (2 servings) pulls in `@./stew{3%servings}`. Asking for 4
+    // servings of stew_dinner doubles it → 6 servings of stew → factor 1.0.
+    let menu = "= Day 1 =\n\nDinner:\n\n@./stew_dinner{4%servings}\n";
+    let plan = build_plan_from_source(menu, &fixtures_dir(), None).unwrap();
+    let recipe = &plan.days[0].meals[0].recipes[0];
+    assert_eq!(recipe.scale, 2.0);
+    assert_eq!(grams(recipe, "beef"), 1200.0);
+    let bread = recipe
+        .ingredients
+        .iter()
+        .find(|i| i.name == "bread")
+        .unwrap();
+    assert_eq!(bread.quantity.as_ref().unwrap().value, 4.0);
+}
