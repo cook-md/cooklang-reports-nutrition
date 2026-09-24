@@ -96,7 +96,13 @@ pub struct PlanMeal {
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct PlanRecipe {
     pub name: String,
+    /// Factor actually applied to the recipe. For `{3%servings}` against a
+    /// 6-serving recipe this is 0.5, not 3.
     pub scale: f64,
+    /// Unit of the reference quantity (`servings`, a yield unit, or `None` for
+    /// a bare multiplier). Internal to resolution.
+    #[serde(skip)]
+    pub scale_unit: Option<String>,
     pub ingredients: Vec<ScaledIngredient>,
     /// Directory components of the recipe reference (`@./Salads/Caprese{}` →
     /// `[".", "Salads"]`), resolved against the plan's base path. Internal to
@@ -225,13 +231,14 @@ pub fn build_plan(recipe: &Recipe, base_path: &Path) -> Result<Plan, PlanError> 
                             });
                             continue;
                         };
-                        let scale = ingredient_scale_number(ing).unwrap_or(1.0);
+                        let (scale, scale_unit) = ingredient_scale_target(ing);
                         let name = reference_stem(reference);
                         unique.insert(name.clone());
                         let meal = current.get_or_insert_with(PlanMeal::default);
                         meal.recipes.push(PlanRecipe {
                             name,
                             scale,
+                            scale_unit,
                             ingredients: Vec::new(),
                             components: reference.components.clone(),
                         });
@@ -264,8 +271,16 @@ pub fn build_plan(recipe: &Recipe, base_path: &Path) -> Result<Plan, PlanError> 
                 // A recipe that can't be expanded (missing file, parse error,
                 // recursion) contributes nothing; record it instead of failing
                 // the whole plan, so one dangling ref doesn't kill the report.
-                match load_recipe_ingredients(&p, r.scale, &mut in_progress) {
-                    Ok(ings) => r.ingredients = ings,
+                match load_recipe_ingredients(
+                    &p,
+                    r.scale,
+                    r.scale_unit.as_deref(),
+                    &mut in_progress,
+                ) {
+                    Ok((ings, factor)) => {
+                        r.ingredients = ings;
+                        r.scale = factor;
+                    }
                     Err(e) => {
                         missing.push(MissingRecipe {
                             name: r.name.clone(),
@@ -289,17 +304,38 @@ pub fn build_plan(recipe: &Recipe, base_path: &Path) -> Result<Plan, PlanError> 
     Ok(plan)
 }
 
-/// Extract a numeric quantity from an ingredient. Non-numeric quantities
-/// (text/range) return `None`; callers default to 1.0.
-fn ingredient_scale_number(ing: &CookIngredient) -> Option<f64> {
-    let q = ing.quantity.as_ref()?;
+/// Extract the scaling target from a recipe reference's quantity: the number
+/// plus its unit (`{3%servings}` → `(3.0, Some("servings"))`, `{2}` →
+/// `(2.0, None)`). Missing or non-numeric quantities (text/range) scale by 1.0.
+fn ingredient_scale_target(ing: &CookIngredient) -> (f64, Option<String>) {
+    let Some(q) = ing.quantity.as_ref() else {
+        return (1.0, None);
+    };
     // `q.value()` returns `&Value`; destructure with `&` so `n: Number` (Copy)
     // and we can call `value(self)`.
     if let &cooklang::Value::Number(n) = q.value() {
-        Some(n.value())
+        (n.value(), q.unit().map(str::to_string))
     } else {
-        None
+        (1.0, None)
     }
+}
+
+/// Scale `recipe` to the reference target and return the factor applied.
+/// `{3%servings}` scales *to* 3 servings (×0.5 for a 6-serving recipe). A bare
+/// number, any other unit, or a recipe without numeric `servings:` falls back
+/// to a raw multiplier.
+fn scale_recipe_to_target(recipe: &mut Recipe, value: f64, unit: Option<&str>) -> f64 {
+    let base = recipe
+        .metadata
+        .servings()
+        .and_then(|s| s.as_number())
+        .filter(|&b| b > 0);
+    let factor = match (unit, base) {
+        (Some("servings" | "serving"), Some(base)) => value / base as f64,
+        _ => value,
+    };
+    recipe.scale(factor, &Converter::default());
+    factor
 }
 
 fn reference_stem(r: &cooklang::RecipeReference) -> String {
@@ -335,8 +371,9 @@ fn quantity_to_scaled(q: &cooklang::Quantity) -> Option<ScaledQuantity> {
 fn load_recipe_ingredients(
     ref_path: &Path,
     scale: f64,
+    scale_unit: Option<&str>,
     in_progress: &mut HashSet<PathBuf>,
-) -> Result<Vec<ScaledIngredient>, PlanError> {
+) -> Result<(Vec<ScaledIngredient>, f64), PlanError> {
     let canonical = ref_path.canonicalize().map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => PlanError::RecipeNotFound {
             ref_path: ref_path.to_path_buf(),
@@ -364,19 +401,26 @@ fn load_recipe_ingredients(
                 ref_path: canonical.clone(),
                 message: format!("{errs}"),
             })?;
-    recipe.scale(scale, &Converter::default());
+    let factor = scale_recipe_to_target(&mut recipe, scale, scale_unit);
 
     let mut out = Vec::new();
     for ing in &recipe.ingredients {
         if let Some(inner_ref) = ing.reference.as_ref() {
             // Nested ref resolves relative to *this* recipe's directory.
-            let inner_scale = ingredient_scale_number(ing).unwrap_or(1.0);
+            // The quantity was already multiplied by this recipe's factor, so
+            // `{3%servings}` here arrives as "3 × factor servings".
+            let (inner_scale, inner_unit) = ingredient_scale_target(ing);
             let inner_base = canonical
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf();
             let inner_path = resolve_ref_path(&inner_base, inner_ref);
-            let nested = load_recipe_ingredients(&inner_path, inner_scale, in_progress)?;
+            let (nested, _) = load_recipe_ingredients(
+                &inner_path,
+                inner_scale,
+                inner_unit.as_deref(),
+                in_progress,
+            )?;
             out.extend(nested);
         } else {
             out.push(ScaledIngredient {
@@ -387,7 +431,7 @@ fn load_recipe_ingredients(
         }
     }
     in_progress.remove(&canonical);
-    Ok(out)
+    Ok((out, factor))
 }
 
 #[cfg(test)]
@@ -468,6 +512,7 @@ mod tests {
                     recipes: vec![PlanRecipe {
                         name: "pancakes".to_string(),
                         scale: 2.0,
+                        scale_unit: None,
                         ingredients: vec![],
                         components: vec![],
                     }],
