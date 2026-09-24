@@ -1,6 +1,6 @@
 [package]
 name = "cooklang-reports-nutrition"
-version = "0.1.0"
+version = "0.1.1"
 description = "Nutrition extension for cooklang-reports: nutrition_for(), aggregate totals, %DV, allergens, and pass/fail checks in jinja recipe reports"
 keywords = ["cooklang", "nutrition", "jinja", "reports"]
 categories = ["template-engine"]
