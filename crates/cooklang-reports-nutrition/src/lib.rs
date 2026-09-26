@@ -458,14 +458,21 @@ impl ConfigExtension for NutritionExtension {
         let failures = self.failures.clone();
         env.add_function(
             "aggregate_nutrition",
-            move |ingredients: minijinja::Value| -> Result<minijinja::Value, minijinja::Error> {
+            move |ingredients: minijinja::Value,
+                  standard: Option<String>|
+                  -> Result<minijinja::Value, minijinja::Error> {
                 let items = ingredients_to_items(&ingredients)?;
                 if items.is_empty() {
                     return Ok(minijinja::Value::from_serialize(empty_aggregate_response()));
                 }
-                let resp = client.aggregate(&items, &exclusions, None).map_err(|e| {
-                    minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-                })?;
+                // Optional reference standard (`fda`, `eu`, `uk`); it also selects
+                // the allergen view. Empty or absent keeps the service default.
+                let std_slug = standard.filter(|s| !s.is_empty());
+                let resp = client
+                    .aggregate(&items, &exclusions, std_slug.as_deref())
+                    .map_err(|e| {
+                        minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+                    })?;
                 record_failures(&failures, &resp);
                 {
                     let mut m = matched.lock().unwrap();

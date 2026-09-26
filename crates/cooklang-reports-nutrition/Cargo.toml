@@ -1,6 +1,6 @@
 [package]
 name = "cooklang-reports-nutrition"
-version = "0.1.1"
+version = "0.1.2"
 description = "Nutrition extension for cooklang-reports: nutrition_for(), aggregate totals, %DV, allergens, and pass/fail checks in jinja recipe reports"
 keywords = ["cooklang", "nutrition", "jinja", "reports"]
 categories = ["template-engine"]
@@ -12,7 +12,7 @@ repository.workspace = true
 
 [dependencies]
 minijinja = { workspace = true }
-cookmd-nutrition-client = { path = "../cookmd-nutrition-client", version = "0.1.0" }
+cookmd-nutrition-client = { path = "../cookmd-nutrition-client", version = "0.1.1" }
 cooklang-reports = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
