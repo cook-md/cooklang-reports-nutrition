@@ -181,7 +181,7 @@ pub enum ClientError {
     CategoryNotFound(String),
     #[error("authentication required: {0}")]
     Unauthorized(String),
-    #[error("{0}")]
+    #[error("subscription required: {0}")]
     SubscriptionRequired(String),
     #[error("nutrition service unavailable: {0}")]
     Unavailable(String),
@@ -671,9 +671,12 @@ mod auth_error_mapping_tests {
         .await
         .unwrap();
         match err {
-            ClientError::SubscriptionRequired(msg) => {
+            ClientError::SubscriptionRequired(ref msg) => {
                 assert!(msg.contains("active Cook Pro subscription required"));
                 assert!(msg.contains("https://cook.md/pro"));
+                // Callers that only see the rendered text (e.g. report
+                // templates) classify errors by this stable prefix.
+                assert!(err.to_string().starts_with("subscription required: "));
             }
             other => panic!("expected SubscriptionRequired, got {other:?}"),
         }
