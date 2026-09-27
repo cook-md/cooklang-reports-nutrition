@@ -45,14 +45,93 @@ pub fn within_tol(actual: f64, base: f64, tol_pct: f64) -> bool {
     (actual - base).abs() <= allowed
 }
 
-/// Extract a leading numeric prefix from a string ("1-2" -> 1, "2 cloves" -> 2).
-fn leading_number(s: &str) -> Option<f64> {
-    let t = s.trim();
-    let end = t.find(|c: char| !(c.is_ascii_digit() || c == '.'))?;
-    if end == 0 {
+/// Value of a unicode vulgar-fraction character (`½` -> 0.5), if it is one.
+fn vulgar_fraction(c: char) -> Option<f64> {
+    let (n, d) = match c {
+        '½' => (1.0, 2.0),
+        '⅓' => (1.0, 3.0),
+        '⅔' => (2.0, 3.0),
+        '¼' => (1.0, 4.0),
+        '¾' => (3.0, 4.0),
+        '⅕' => (1.0, 5.0),
+        '⅖' => (2.0, 5.0),
+        '⅗' => (3.0, 5.0),
+        '⅘' => (4.0, 5.0),
+        '⅙' => (1.0, 6.0),
+        '⅚' => (5.0, 6.0),
+        '⅐' => (1.0, 7.0),
+        '⅛' => (1.0, 8.0),
+        '⅜' => (3.0, 8.0),
+        '⅝' => (5.0, 8.0),
+        '⅞' => (7.0, 8.0),
+        '⅑' => (1.0, 9.0),
+        '⅒' => (1.0, 10.0),
+        _ => return None,
+    };
+    Some(n / d)
+}
+
+/// Split off a leading run of ASCII digits: `("12", "rest")`.
+fn split_digits(s: &str) -> (&str, &str) {
+    let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    s.split_at(end)
+}
+
+/// Parse a leading fraction: a unicode vulgar fraction (`½`) or `a/b` with
+/// integer `a`, `b` and `b != 0` (`⁄`, the fraction slash, also accepted).
+/// Returns the value and the unparsed remainder.
+fn leading_fraction(s: &str) -> Option<(f64, &str)> {
+    let mut chars = s.chars();
+    if let Some(v) = chars.next().and_then(vulgar_fraction) {
+        return Some((v, chars.as_str()));
+    }
+    let (num, rest) = split_digits(s);
+    if num.is_empty() {
         return None;
     }
-    t[..end].parse::<f64>().ok()
+    let rest = rest.strip_prefix(['/', '⁄'])?;
+    let (den, rest) = split_digits(rest);
+    let den: f64 = den.parse().ok()?;
+    if den == 0.0 {
+        return None;
+    }
+    Some((num.parse::<f64>().ok()? / den, rest))
+}
+
+/// Parse the leading number of a text quantity the Cooklang parser left
+/// unparsed, returning its value when finite and positive.
+///
+/// The number may be an integer or decimal (`2`, `2.25`), a fraction (`3/4`,
+/// `½`) or a mixed number (`1 1/2`, `1½`, `1 ½`, `1 and 1/2`). Anything after
+/// it is ignored, so a range (`1-2`, `3/4-1`, `½-¾`, `1 to 2`, `1–2`) yields
+/// its lower bound and `2 large` yields 2.
+fn parse_amount_text(s: &str) -> Option<f64> {
+    let t = s.trim();
+    let value = if let Some((frac, _)) = leading_fraction(t) {
+        frac
+    } else {
+        let (int, rest) = split_digits(t);
+        let (whole, rest, is_integer) = match rest.strip_prefix('.') {
+            Some(after_dot) => {
+                let (decimals, rest) = split_digits(after_dot);
+                let len = int.len() + 1 + decimals.len();
+                (t[..len].parse::<f64>().ok()?, rest, false)
+            }
+            None => (int.parse::<f64>().ok()?, rest, true),
+        };
+        // Mixed number: an integer followed by a fraction, optionally joined
+        // by whitespace and/or `and`.
+        let tail = rest.trim_start();
+        let tail = match tail.strip_prefix("and") {
+            Some(after_and) if after_and.starts_with(char::is_whitespace) => after_and.trim_start(),
+            _ => tail,
+        };
+        match leading_fraction(tail) {
+            Some((frac, _)) if is_integer => whole + frac,
+            _ => whole,
+        }
+    };
+    (value.is_finite() && value > 0.0).then_some(value)
 }
 
 /// Interpret a cooklang quantity value string + declared unit into a numeric
@@ -67,7 +146,7 @@ fn interpret_amount(value_str: &str, unit: &str) -> (f64, String) {
             return (n, unit.to_string());
         }
     }
-    if let Some(n) = leading_number(v) {
+    if let Some(n) = parse_amount_text(v) {
         return (n, unit.to_string());
     }
     match v.to_lowercase().as_str() {
@@ -842,5 +921,139 @@ fn value_to_ingredient_name(v: &minijinja::Value) -> Result<String, minijinja::E
             minijinja::ErrorKind::InvalidOperation,
             "expected an ingredient name (string) or an object with a .name attribute",
         )),
+    }
+}
+
+#[cfg(test)]
+mod amount_tests {
+    use super::interpret_amount;
+
+    fn amount(value: &str, unit: &str) -> (f64, String) {
+        interpret_amount(value, unit)
+    }
+
+    fn assert_amount(value: &str, expected: f64) {
+        let (n, u) = amount(value, "cup");
+        assert!(
+            (n - expected).abs() < 1e-9,
+            "{value:?}: expected {expected}, got {n}"
+        );
+        assert_eq!(u, "cup", "{value:?}: unit changed");
+    }
+
+    #[test]
+    fn unicode_vulgar_fractions() {
+        let cases = [
+            ("½", 0.5),
+            ("¼", 0.25),
+            ("¾", 0.75),
+            ("⅓", 1.0 / 3.0),
+            ("⅔", 2.0 / 3.0),
+            ("⅛", 0.125),
+            ("⅜", 0.375),
+            ("⅝", 0.625),
+            ("⅞", 0.875),
+            ("⅕", 0.2),
+            ("⅖", 0.4),
+            ("⅗", 0.6),
+            ("⅘", 0.8),
+            ("⅙", 1.0 / 6.0),
+            ("⅚", 5.0 / 6.0),
+        ];
+        for (v, e) in cases {
+            assert_amount(v, e);
+        }
+    }
+
+    #[test]
+    fn fraction_ranges_use_lower_bound() {
+        assert_amount("3/4-1", 0.75);
+        assert_amount("1/2 - 3/4", 0.5);
+        assert_amount("½-¾", 0.5);
+    }
+
+    #[test]
+    fn mixed_numbers() {
+        assert_amount("1 and 1/2", 1.5);
+        assert_amount("1 ½", 1.5);
+        assert_amount("1½", 1.5);
+        assert_amount("1 1/2", 1.5);
+        assert_amount("2 and ½", 2.5);
+    }
+
+    #[test]
+    fn numeric_ranges_use_lower_bound() {
+        assert_amount("1-2", 1.0);
+        assert_amount("2-3", 2.0);
+        assert_amount("2-2.25", 2.0);
+        assert_amount("1 to 2", 1.0);
+        assert_amount("1–2", 1.0);
+        assert_amount("1—2", 1.0);
+        assert_amount("1 - 2", 1.0);
+    }
+
+    #[test]
+    fn plain_fraction_text() {
+        assert_amount("1/2", 0.5);
+        assert_amount("3/4", 0.75);
+    }
+
+    #[test]
+    fn plain_numbers() {
+        assert_amount("2", 2.0);
+        assert_amount("0.5", 0.5);
+        assert_amount(" 150 ", 150.0);
+        assert_amount("2 large", 2.0);
+    }
+
+    #[test]
+    fn zero_denominator_is_not_a_fraction() {
+        // `1/0` is not a fraction; the leading `1` still stands (as `1-2` does).
+        assert_amount("1/0", 1.0);
+        assert_eq!(amount("0/0", "cup"), (1.0, "cup".to_string()));
+    }
+
+    #[test]
+    fn text_mappings_preserved() {
+        for v in ["pinch", "a pinch", "Pinches"] {
+            assert_eq!(amount(v, "g"), (1.0, "pinch".to_string()), "{v}");
+        }
+        assert_eq!(amount("dash", ""), (1.0, "dash".to_string()));
+        for v in [
+            "to taste",
+            "as needed",
+            "as required",
+            "to serve",
+            "for serving",
+            "for garnish",
+            "to garnish",
+            "for dusting",
+            "optional",
+        ] {
+            assert_eq!(amount(v, "g"), (1.0, "pinch".to_string()), "{v}");
+        }
+    }
+
+    #[test]
+    fn empty_is_pinch() {
+        assert_eq!(amount("", ""), (1.0, "pinch".to_string()));
+        assert_eq!(amount("   ", ""), (1.0, "pinch".to_string()));
+    }
+
+    #[test]
+    fn unrecognised_text_fallbacks() {
+        assert_eq!(amount("some", "cup"), (1.0, "cup".to_string()));
+        assert_eq!(amount("some", ""), (1.0, "pinch".to_string()));
+        assert_eq!(amount("and 1/2", "cup"), (1.0, "cup".to_string()));
+    }
+
+    #[test]
+    fn non_positive_and_nan_not_accepted() {
+        assert_eq!(amount("0", "cup"), (1.0, "cup".to_string()));
+        assert_eq!(amount("-1", "cup"), (1.0, "cup".to_string()));
+        assert_eq!(amount("NaN", "cup"), (1.0, "cup".to_string()));
+        assert_eq!(amount("inf", "cup"), (1.0, "cup".to_string()));
+        assert_eq!(amount("0/4", "cup"), (1.0, "cup".to_string()));
+        assert_eq!(amount("0", ""), (1.0, "pinch".to_string()));
     }
 }

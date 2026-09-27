@@ -367,6 +367,36 @@ async fn aggregate_nutrition_skips_non_numeric_quantities() {
     assert!(rendered.contains("K=200"), "got: {rendered}");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn aggregate_nutrition_sends_unicode_fraction_as_decimal() {
+    // The Cooklang parser leaves `½` as a TEXT value; it must still reach the
+    // service as 0.5 (issue #4), not the 1.0 fallback. Unmatched -> 404 -> the
+    // render fails.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/aggregate"))
+        .and(body_partial_json(serde_json::json!({
+            "items": [{ "ingredient": "flour", "amount": 0.5, "unit": "cup" }]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(aggregate_mock_response()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let base = server.uri();
+    tokio::task::spawn_blocking(move || {
+        let client = Arc::new(Client::new(base));
+        let ext = NutritionExtension::new(client);
+        let config = Config::builder().build().with_extension(ext);
+        let recipe = "Sift @flour{½%cup}.";
+        let template =
+            "{% set agg = aggregate_nutrition(ingredients) %}K={{ agg.totals.macros.kcal }}";
+        render_template_with_config(recipe, template, &config).unwrap()
+    })
+    .await
+    .unwrap();
+}
+
 fn aggregate_mock_response() -> serde_json::Value {
     serde_json::json!({
         "items": [],
