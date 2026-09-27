@@ -99,7 +99,7 @@ use cooklang_reports::{Config, render_template_with_config};
 use cooklang_reports_nutrition::NutritionExtension;
 use cooklang_reports_nutrition::checks::CheckTracker;
 use cookmd_nutrition_client::Client;
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{body_partial_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
@@ -262,6 +262,59 @@ async fn aggregate_nutrition_returns_totals() {
 
     assert!(rendered.contains("K=312"), "got: {rendered}");
     assert!(rendered.contains("C=confirmed"), "got: {rendered}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn aggregate_nutrition_forwards_optional_standard() {
+    let server = MockServer::start().await;
+    // Only matches when the request body carries `"reference": "eu"`; an
+    // unmatched request gets wiremock's 404 and the render fails.
+    Mock::given(method("POST"))
+        .and(path("/aggregate"))
+        .and(body_partial_json(serde_json::json!({ "reference": "eu" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": [{
+                "ingredient": "butter", "preparation": "raw",
+                "amount": { "value": 50.0, "unit": "g", "mass_g": 50.0 },
+                "macros": { "kcal": 358.0, "protein_g": 0.4, "fat_g": 40.5,
+                            "carb_g": 0.0, "fiber_g": 0.0, "sugar_g": 0.0, "sat_fat_g": 25.7 },
+                "micros": {}, "vitamins": {}, "source": "usda",
+                "confidence": "confirmed", "warnings": [],
+                "allergens": { "status": "verified",
+                               "contains": [{ "class": "milk", "label": "Milk" }], "view": "eu" }
+            }],
+            "failures": [],
+            "totals": {
+                "mass_g": 50.0,
+                "macros": { "kcal": 358.0, "protein_g": 0.4, "fat_g": 40.5,
+                            "carb_g": 0.0, "fiber_g": 0.0, "sugar_g": 0.0, "sat_fat_g": 25.7 },
+                "micros": {}, "vitamins": {},
+                "confidence": "confirmed", "is_partial": false,
+                "included_count": 1, "failed_count": 0
+            },
+            "confidence_breakdown": {
+                "confirmed_items": 1, "partial_items": 0, "estimated_items": 0,
+                "estimated_ingredients": [], "estimated_share_of_micronutrients": null
+            },
+            "allergen_summary": { "contains": [{ "class": "milk", "label": "Milk" }],
+                                  "unverified_ingredients": [], "view": "eu" }
+        })))
+        .mount(&server)
+        .await;
+
+    let base = server.uri();
+    let rendered = tokio::task::spawn_blocking(move || {
+        let client = Arc::new(Client::new(base));
+        let ext = NutritionExtension::new(client);
+        let config = Config::builder().build().with_extension(ext);
+        let recipe = "Melt @butter{50%g}.";
+        let template = r#"{% set agg = aggregate_nutrition(ingredients, "eu") %}{{ agg["items"][0].allergens.status }}|{{ agg["items"][0].allergens.contains[0].class }}"#;
+        render_template_with_config(recipe, template, &config).unwrap()
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(rendered, "verified|milk");
 }
 
 #[tokio::test(flavor = "multi_thread")]

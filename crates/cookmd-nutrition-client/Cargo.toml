@@ -1,6 +1,6 @@
 [package]
 name = "cookmd-nutrition-client"
-version = "0.1.0"
+version = "0.1.1"
 description = "HTTP client for the cook.md nutrition service (macros, micros, allergens, reference intakes)"
 keywords = ["cooklang", "nutrition", "cookmd"]
 categories = ["api-bindings"]

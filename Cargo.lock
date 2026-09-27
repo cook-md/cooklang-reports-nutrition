@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "cooklang-reports-nutrition"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cooklang",
  "cooklang-reports",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "cookmd-nutrition-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "reqwest",
  "serde",
