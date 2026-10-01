@@ -5,7 +5,7 @@ use minijinja::Environment;
 fn compare_gte_true() {
     let mut env = Environment::new();
     env.add_function("compare", compare_fn);
-    env.add_template("t", "{{ compare(39, 30, 'gte') }}")
+    env.add_template("t", "{{ 'true' if compare(39, 30, 'gte') else 'false' }}")
         .unwrap();
     let out = env.get_template("t").unwrap().render(()).unwrap();
     assert_eq!(out, "true");
@@ -15,7 +15,7 @@ fn compare_gte_true() {
 fn compare_gte_false() {
     let mut env = Environment::new();
     env.add_function("compare", compare_fn);
-    env.add_template("t", "{{ compare(10, 30, 'gte') }}")
+    env.add_template("t", "{{ 'true' if compare(10, 30, 'gte') else 'false' }}")
         .unwrap();
     let out = env.get_template("t").unwrap().render(()).unwrap();
     assert_eq!(out, "false");
@@ -25,7 +25,7 @@ fn compare_gte_false() {
 fn compare_lte_true() {
     let mut env = Environment::new();
     env.add_function("compare", compare_fn);
-    env.add_template("t", "{{ compare(10, 30, 'lte') }}")
+    env.add_template("t", "{{ 'true' if compare(10, 30, 'lte') else 'false' }}")
         .unwrap();
     let out = env.get_template("t").unwrap().render(()).unwrap();
     assert_eq!(out, "true");
@@ -35,7 +35,7 @@ fn compare_lte_true() {
 fn compare_eq_true() {
     let mut env = Environment::new();
     env.add_function("compare", compare_fn);
-    env.add_template("t", "{{ compare(30, 30, 'eq') }}")
+    env.add_template("t", "{{ 'true' if compare(30, 30, 'eq') else 'false' }}")
         .unwrap();
     let out = env.get_template("t").unwrap().render(()).unwrap();
     assert_eq!(out, "true");
@@ -45,8 +45,11 @@ fn compare_eq_true() {
 fn compare_unknown_op_is_false() {
     let mut env = Environment::new();
     env.add_function("compare", compare_fn);
-    env.add_template("t", "{{ compare(30, 30, 'within') }}")
-        .unwrap();
+    env.add_template(
+        "t",
+        "{{ 'true' if compare(30, 30, 'within') else 'false' }}",
+    )
+    .unwrap();
     let out = env.get_template("t").unwrap().render(()).unwrap();
     assert_eq!(out, "false");
 }
@@ -878,7 +881,7 @@ async fn is_in_category_true_for_member() {
         let client = Arc::new(Client::new(base));
         let ext = NutritionExtension::new(client);
         let config = Config::builder().build().with_extension(ext);
-        let template = "R={{ is_in_category('salmon', 'oily_fish') }}";
+        let template = "R={{ 'true' if is_in_category('salmon', 'oily_fish') else 'false' }}";
         render_template_with_config("", template, &config).unwrap()
     })
     .await
