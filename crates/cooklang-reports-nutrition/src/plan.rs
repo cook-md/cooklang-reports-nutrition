@@ -2,7 +2,7 @@
 
 use regex::Regex;
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
@@ -157,6 +157,23 @@ pub fn build_plan_from_source(
     base_path: &Path,
     menu_path: Option<&Path>,
 ) -> Result<Plan, PlanError> {
+    build_plan_from_source_with_overrides(menu_src, base_path, menu_path, &HashMap::new())
+}
+
+/// [`build_plan_from_source`], reading referenced recipes from `overrides`
+/// before the filesystem.
+///
+/// Keys are recipe file paths (`<base>/Main Dish/Teriyaki Steak.cook`), matched
+/// after collapsing `.`/`..` segments. An editor passes the recipes it has
+/// staged but not yet saved, so a plan and the new recipes it links to can be
+/// measured before the user applies them; an override also shadows a saved
+/// file with the same path.
+pub fn build_plan_from_source_with_overrides(
+    menu_src: &str,
+    base_path: &Path,
+    menu_path: Option<&Path>,
+    overrides: &HashMap<PathBuf, String>,
+) -> Result<Plan, PlanError> {
     let parser = CooklangParser::new(Extensions::all(), Converter::default());
     let (mut recipe, _warnings) =
         parser
@@ -168,11 +185,25 @@ pub fn build_plan_from_source(
             })?;
     // `.menu` files don't get user-driven scaling; pass 1.0 so quantities stay as written.
     recipe.scale(1.0, &Converter::default());
-    build_plan(&recipe, base_path)
+    build_plan_with_overrides(&recipe, base_path, overrides)
 }
 
 /// Build a [`Plan`] from a parsed, scaled `.menu` recipe.
 pub fn build_plan(recipe: &Recipe, base_path: &Path) -> Result<Plan, PlanError> {
+    build_plan_with_overrides(recipe, base_path, &HashMap::new())
+}
+
+/// [`build_plan`] with staged recipe sources; see
+/// [`build_plan_from_source_with_overrides`].
+pub fn build_plan_with_overrides(
+    recipe: &Recipe,
+    base_path: &Path,
+    overrides: &HashMap<PathBuf, String>,
+) -> Result<Plan, PlanError> {
+    let overrides: HashMap<PathBuf, &str> = overrides
+        .iter()
+        .map(|(path, src)| (normalize_lexically(path), src.as_str()))
+        .collect();
     let mut plan = Plan {
         servings: recipe.metadata.servings().and_then(|s| match s {
             cooklang::metadata::Servings::Number(n) => Some(n),
@@ -275,6 +306,7 @@ pub fn build_plan(recipe: &Recipe, base_path: &Path) -> Result<Plan, PlanError> 
                     &p,
                     r.scale,
                     r.scale_unit.as_deref(),
+                    &overrides,
                     &mut in_progress,
                 ) {
                     Ok((ings, factor)) => {
@@ -368,30 +400,57 @@ fn quantity_to_scaled(q: &cooklang::Quantity) -> Option<ScaledQuantity> {
     Some(ScaledQuantity { value, unit })
 }
 
+/// Collapse `.` and `..` segments without touching the filesystem, so a staged
+/// recipe that does not exist yet still has a stable lookup key.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 fn load_recipe_ingredients(
     ref_path: &Path,
     scale: f64,
     scale_unit: Option<&str>,
+    overrides: &HashMap<PathBuf, &str>,
     in_progress: &mut HashSet<PathBuf>,
 ) -> Result<(Vec<ScaledIngredient>, f64), PlanError> {
-    let canonical = ref_path.canonicalize().map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => PlanError::RecipeNotFound {
-            ref_path: ref_path.to_path_buf(),
-        },
-        _ => PlanError::ReadFailed {
-            ref_path: ref_path.to_path_buf(),
-            source: e,
-        },
-    })?;
+    let normalized = normalize_lexically(ref_path);
+    let (canonical, src) = match overrides.get(&normalized) {
+        Some(src) => (normalized, (*src).to_string()),
+        None => {
+            let canonical = ref_path.canonicalize().map_err(|e| match e.kind() {
+                std::io::ErrorKind::NotFound => PlanError::RecipeNotFound {
+                    ref_path: ref_path.to_path_buf(),
+                },
+                _ => PlanError::ReadFailed {
+                    ref_path: ref_path.to_path_buf(),
+                    source: e,
+                },
+            })?;
+            let src = std::fs::read_to_string(&canonical).map_err(|e| PlanError::ReadFailed {
+                ref_path: canonical.clone(),
+                source: e,
+            })?;
+            (canonical, src)
+        }
+    };
     if !in_progress.insert(canonical.clone()) {
         return Err(PlanError::RecursiveRef {
             ref_path: canonical,
         });
     }
-    let src = std::fs::read_to_string(&canonical).map_err(|e| PlanError::ReadFailed {
-        ref_path: canonical.clone(),
-        source: e,
-    })?;
     let parser = CooklangParser::new(Extensions::all(), Converter::default());
     let (mut recipe, _w) =
         parser
@@ -419,6 +478,7 @@ fn load_recipe_ingredients(
                 &inner_path,
                 inner_scale,
                 inner_unit.as_deref(),
+                overrides,
                 in_progress,
             )?;
             out.extend(nested);

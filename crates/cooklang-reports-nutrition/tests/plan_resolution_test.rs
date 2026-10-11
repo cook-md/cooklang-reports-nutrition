@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
-use cooklang_reports_nutrition::plan::build_plan_from_source;
+use std::collections::HashMap;
+
+use cooklang_reports_nutrition::plan::{
+    build_plan_from_source, build_plan_from_source_with_overrides,
+};
 
 fn fixtures_dir() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -192,4 +196,80 @@ fn build_plan_nested_servings_ref_scales_to_target_servings() {
         .find(|i| i.name == "bread")
         .unwrap();
     assert_eq!(bread.quantity.as_ref().unwrap().value, 4.0);
+}
+
+#[test]
+fn build_plan_override_resolves_a_recipe_not_yet_on_disk() {
+    // The editor stages a new recipe (not written yet) alongside the plan that
+    // references it; the override must stand in for the missing file.
+    let menu = "= Day 1 =\n\nDinner:\n\n@./Main Dish/Teriyaki Steak{2}\n";
+    let mut overrides = HashMap::new();
+    overrides.insert(
+        fixtures_dir().join("Main Dish").join("Teriyaki Steak.cook"),
+        "Sear @skirt steak{300%g} with @teriyaki sauce{60%ml}.\n".to_string(),
+    );
+    let plan =
+        build_plan_from_source_with_overrides(menu, &fixtures_dir(), None, &overrides).unwrap();
+    assert!(
+        plan.missing_recipes.is_empty(),
+        "{:?}",
+        plan.missing_recipes
+    );
+    let steak = plan.days[0].meals[0].recipes[0]
+        .ingredients
+        .iter()
+        .find(|i| i.name == "skirt steak")
+        .expect("staged recipe expanded");
+    assert_eq!(steak.quantity.as_ref().unwrap().value, 600.0);
+}
+
+#[test]
+fn build_plan_override_shadows_the_file_on_disk() {
+    // A staged edit of an existing recipe wins over the saved file.
+    let menu = "= Day 1 =\n\nBreakfast:\n\n@./pancakes{1}\n";
+    let mut overrides = HashMap::new();
+    overrides.insert(
+        fixtures_dir().join("pancakes.cook"),
+        "Mix @oat flour{80%g}.\n".to_string(),
+    );
+    let plan =
+        build_plan_from_source_with_overrides(menu, &fixtures_dir(), None, &overrides).unwrap();
+    let names: Vec<&str> = plan
+        .all_ingredients
+        .iter()
+        .map(|i| i.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["oat flour"]);
+}
+
+#[test]
+fn build_plan_override_applies_to_nested_refs() {
+    // A staged recipe's own nested reference resolves relative to its folder,
+    // and may itself be staged.
+    let menu = "= Day 1 =\n\nDinner:\n\n@./Mains/Bowl{1}\n";
+    let mut overrides = HashMap::new();
+    overrides.insert(
+        fixtures_dir().join("Mains").join("Bowl.cook"),
+        "Top @./Sauce{1} over @rice{150%g}.\n".to_string(),
+    );
+    overrides.insert(
+        fixtures_dir().join("Mains").join("Sauce.cook"),
+        "Whisk @tahini{30%g}.\n".to_string(),
+    );
+    let plan =
+        build_plan_from_source_with_overrides(menu, &fixtures_dir(), None, &overrides).unwrap();
+    assert!(
+        plan.missing_recipes.is_empty(),
+        "{:?}",
+        plan.missing_recipes
+    );
+    let names: Vec<&str> = plan
+        .all_ingredients
+        .iter()
+        .map(|i| i.name.as_str())
+        .collect();
+    assert!(
+        names.contains(&"tahini") && names.contains(&"rice"),
+        "{names:?}"
+    );
 }
