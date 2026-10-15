@@ -398,7 +398,7 @@ impl ConfigExtension for NutritionExtension {
             "matched_exclusions",
             move || -> Result<minijinja::Value, minijinja::Error> {
                 let v: Vec<String> = matched.lock().unwrap().iter().cloned().collect();
-                Ok(minijinja::Value::from_serialize(&v))
+                Ok(minijinja::Value::from(minijinja::value::Serde(&v)))
             },
         );
         let unresolved = self.unresolved_exclusions.clone();
@@ -406,7 +406,7 @@ impl ConfigExtension for NutritionExtension {
             "unresolved_exclusions",
             move || -> Result<minijinja::Value, minijinja::Error> {
                 let v: Vec<String> = unresolved.lock().unwrap().iter().cloned().collect();
-                Ok(minijinja::Value::from_serialize(&v))
+                Ok(minijinja::Value::from(minijinja::value::Serde(&v)))
             },
         );
 
@@ -449,7 +449,7 @@ impl ConfigExtension for NutritionExtension {
                                 e.to_string(),
                             )
                         })?;
-                    return Ok(minijinja::Value::from_serialize(&facts));
+                    return Ok(minijinja::Value::from(minijinja::value::Serde(&facts)));
                 }
 
                 // Exclusion-aware path: wrap as a 1-item aggregate to pick up
@@ -498,7 +498,7 @@ impl ConfigExtension for NutritionExtension {
                         format!("nutrition_for returned no items for '{name}'"),
                     ));
                 };
-                Ok(minijinja::Value::from_serialize(&facts))
+                Ok(minijinja::Value::from(minijinja::value::Serde(&facts)))
             },
         );
         env.add_function("compare", compare_fn);
@@ -518,7 +518,7 @@ impl ConfigExtension for NutritionExtension {
             "failed_checks",
             move || -> Result<minijinja::Value, minijinja::Error> {
                 let recs: Vec<_> = tracker.snapshot().into_iter().filter(|c| !c.ok).collect();
-                Ok(minijinja::Value::from_serialize(&recs))
+                Ok(minijinja::Value::from(minijinja::value::Serde(&recs)))
             },
         );
 
@@ -526,7 +526,9 @@ impl ConfigExtension for NutritionExtension {
         env.add_function(
             "all_checks",
             move || -> Result<minijinja::Value, minijinja::Error> {
-                Ok(minijinja::Value::from_serialize(tracker.snapshot()))
+                Ok(minijinja::Value::from(minijinja::value::Serde(
+                    tracker.snapshot(),
+                )))
             },
         );
 
@@ -542,7 +544,9 @@ impl ConfigExtension for NutritionExtension {
                   -> Result<minijinja::Value, minijinja::Error> {
                 let items = ingredients_to_items(&ingredients)?;
                 if items.is_empty() {
-                    return Ok(minijinja::Value::from_serialize(empty_aggregate_response()));
+                    return Ok(minijinja::Value::from(minijinja::value::Serde(
+                        empty_aggregate_response(),
+                    )));
                 }
                 // Optional reference standard (`fda`, `eu`, `uk`); it also selects
                 // the allergen view. Empty or absent keeps the service default.
@@ -563,7 +567,7 @@ impl ConfigExtension for NutritionExtension {
                         u.insert(x.clone());
                     }
                 }
-                Ok(minijinja::Value::from_serialize(&resp))
+                Ok(minijinja::Value::from(minijinja::value::Serde(&resp)))
             },
         );
 
@@ -641,9 +645,9 @@ impl ConfigExtension for NutritionExtension {
             move |ingredients: minijinja::Value| -> Result<minijinja::Value, minijinja::Error> {
                 let items = ingredients_to_items(&ingredients)?;
                 if items.is_empty() {
-                    return Ok(minijinja::Value::from_serialize(
+                    return Ok(minijinja::Value::from(minijinja::value::Serde(
                         &empty_aggregate_response().totals.macros,
-                    ));
+                    )));
                 }
                 let resp = client.aggregate(&items, &exclusions, None).map_err(|e| {
                     minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
@@ -659,7 +663,9 @@ impl ConfigExtension for NutritionExtension {
                         u.insert(x.clone());
                     }
                 }
-                Ok(minijinja::Value::from_serialize(&resp.totals.macros))
+                Ok(minijinja::Value::from(minijinja::value::Serde(
+                    &resp.totals.macros,
+                )))
             },
         );
 
@@ -710,15 +716,17 @@ impl ConfigExtension for NutritionExtension {
             move |ingredients: minijinja::Value| -> Result<minijinja::Value, minijinja::Error> {
                 let items = ingredients_to_items(&ingredients)?;
                 if items.is_empty() {
-                    return Ok(minijinja::Value::from_serialize(
+                    return Ok(minijinja::Value::from(minijinja::value::Serde(
                         &empty_aggregate_response().totals.vitamins,
-                    ));
+                    )));
                 }
                 let resp = client.aggregate(&items, &exclusions, None).map_err(|e| {
                     minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
                 })?;
                 record_failures(&failures, &resp);
-                Ok(minijinja::Value::from_serialize(&resp.totals.vitamins))
+                Ok(minijinja::Value::from(minijinja::value::Serde(
+                    &resp.totals.vitamins,
+                )))
             },
         );
 
@@ -754,7 +762,7 @@ impl ConfigExtension for NutritionExtension {
                     })?;
                 record_failures(&failures, &resp);
                 if let Some(it) = resp.items.first() {
-                    Ok(minijinja::Value::from_serialize(it))
+                    Ok(minijinja::Value::from(minijinja::value::Serde(it)))
                 } else if let Some(failure) = resp.failures.first() {
                     Err(minijinja::Error::new(
                         minijinja::ErrorKind::InvalidOperation,
