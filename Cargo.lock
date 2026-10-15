@@ -175,7 +175,7 @@ dependencies = [
  "anyhow",
  "cooklang",
  "cooklang-find",
- "minijinja",
+ "minijinja 2.24.0",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -191,7 +191,7 @@ dependencies = [
  "cooklang-reports",
  "cookmd-nutrition-client",
  "indoc",
- "minijinja",
+ "minijinja 3.0.0",
  "regex",
  "serde",
  "serde_json",
@@ -799,6 +799,15 @@ dependencies = [
  "memo-map",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "minijinja"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13345868cfa94eadafc067112ff29271380a820d5594d9ee6ba81a8d00ea5dc2"
+dependencies = [
+ "indexmap",
 ]
 
 [[package]]
