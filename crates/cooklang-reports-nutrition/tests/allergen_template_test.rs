@@ -23,11 +23,11 @@ use cookmd_nutrition_client::{AllergenBlock, AllergenEntry, AllergenSummary};
 const SNIPPET: &str = include_str!("../src/macros/allergens.jinja");
 
 fn render(summary: &AllergenSummary) -> String {
-    render_value(minijinja::Value::from_serialize(summary))
+    render_value(minijinja::Value::from(minijinja::value::Serde(summary)))
 }
 
 fn render_block(block: &AllergenBlock) -> String {
-    render_value(minijinja::Value::from_serialize(block))
+    render_value(minijinja::Value::from(minijinja::value::Serde(block)))
 }
 
 fn render_value(alg: minijinja::Value) -> String {
