@@ -144,6 +144,29 @@ dependencies = [
  "syn 2.0.119",
  "thiserror",
  "toml",
+ "tracing",
+ "unicase",
+ "unicode-width",
+ "yansi",
+]
+
+[[package]]
+name = "cooklang"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3d3381b8082bb6043b1ab8032d37ccfd040e742fe7b792288a3aa2e2d6bc5be"
+dependencies = [
+ "bitflags",
+ "codesnake",
+ "enum-map",
+ "finl_unicode",
+ "indexmap",
+ "serde",
+ "serde_yaml",
+ "smallvec",
+ "strum",
+ "thiserror",
+ "toml",
  "toml_edit",
  "tracing",
  "unicase",
@@ -168,12 +191,12 @@ dependencies = [
 
 [[package]]
 name = "cooklang-reports"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6653d1b7eb136f9475161c9cf4d1030c1a3a88ec201bc213fad71aedc418b0d"
+checksum = "77d9edeb10af65d6fdb713eabd7ea447b15a8614c21cb270ccf0f095174bb6b5"
 dependencies = [
  "anyhow",
- "cooklang",
+ "cooklang 0.19.0",
  "cooklang-find",
  "minijinja",
  "serde",
@@ -187,7 +210,7 @@ dependencies = [
 name = "cooklang-reports-nutrition"
 version = "0.1.4"
 dependencies = [
- "cooklang",
+ "cooklang 0.18.7",
  "cooklang-reports",
  "cookmd-nutrition-client",
  "indoc",
@@ -285,7 +308,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -944,7 +967,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1096,7 +1119,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1353,7 +1376,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
