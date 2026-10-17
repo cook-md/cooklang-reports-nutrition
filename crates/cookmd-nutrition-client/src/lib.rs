@@ -199,7 +199,18 @@ pub enum ClientError {
 struct ClientCache {
     nutrition: std::sync::Mutex<std::collections::HashMap<String, NutritionFacts>>,
     category: std::sync::Mutex<std::collections::HashMap<String, bool>>,
+    /// Ingredient → category slugs (ancestors included) from `POST
+    /// /categories/classify`. `None` = the service could not resolve the name.
+    ingredient_categories: std::sync::Mutex<std::collections::HashMap<String, Option<Vec<String>>>>,
+    /// Valid category slugs from `GET /categories`; `None` until first loaded.
+    known_slugs: std::sync::Mutex<Option<std::collections::HashSet<String>>>,
+    /// Set once the service answered 404/405 to a batch endpoint (older
+    /// service): from then on `is_in_category` uses per-slug `/check`.
+    batch_unsupported: std::sync::atomic::AtomicBool,
 }
+
+/// Max ingredient names the service accepts per `POST /categories/classify`.
+const CLASSIFY_CHUNK: usize = 200;
 
 /// A single standard's daily reference-intake table (`nutrient_slug` → amount).
 type ReferenceTable = std::collections::BTreeMap<String, f64>;
@@ -365,10 +376,211 @@ impl Client {
         Err(parse_error(resp, status.as_u16()))
     }
 
-    /// `GET /categories/{slug}/check` — whether an ingredient is in a category
-    /// (tree-aware). An unknown ingredient resolves to `false`; an unknown
-    /// category slug surfaces as `CategoryNotFound` so template typos are caught.
+    /// Whether an ingredient is in a category (tree-aware). An unknown
+    /// ingredient resolves to `false`; an unknown category slug surfaces as
+    /// `CategoryNotFound` so template typos are caught.
+    ///
+    /// Without [`Client::cached`] this is one `GET /categories/{slug}/check`
+    /// request per call. With the cache on, the slug is validated against
+    /// `GET /categories` (fetched once) and the ingredient's categories come
+    /// from `POST /categories/classify` (one request per new ingredient,
+    /// regardless of how many slugs are asked), so repeated calls are free.
+    /// Against an older service without those endpoints it falls back to the
+    /// per-slug `/check` path.
     pub fn is_in_category(&self, ingredient: &str, slug: &str) -> Result<bool, ClientError> {
+        let Some(cache) = self.batch_cache() else {
+            return self.is_in_category_check(ingredient, slug);
+        };
+        if !self.ensure_known_slugs(cache)? {
+            return self.is_in_category_check(ingredient, slug);
+        }
+        let known = cache
+            .known_slugs
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|k| k.contains(slug));
+        if !known {
+            // Same variant/content the service's /check 404 produces.
+            return Err(ClientError::CategoryNotFound(format!(
+                "category not found: {slug}"
+            )));
+        }
+        let cached = cache
+            .ingredient_categories
+            .lock()
+            .unwrap()
+            .get(ingredient)
+            .cloned();
+        let cats = match cached {
+            Some(c) => c,
+            None => {
+                if !self.fill_classified(cache, &[ingredient.to_string()])? {
+                    return self.is_in_category_check(ingredient, slug);
+                }
+                cache
+                    .ingredient_categories
+                    .lock()
+                    .unwrap()
+                    .get(ingredient)
+                    .cloned()
+                    .flatten()
+            }
+        };
+        Ok(cats.is_some_and(|c| c.iter().any(|s| s == slug)))
+    }
+
+    /// `POST /categories/classify` — category slugs (ancestors included) for
+    /// each ingredient name. Names are deduplicated and sent in chunks of 200,
+    /// one request per chunk. `None` means the service could not resolve the
+    /// name. Does not read or write the cache; errors with `Server(404|405)`
+    /// against a service that predates the endpoint.
+    pub fn classify(
+        &self,
+        ingredients: &[String],
+    ) -> Result<std::collections::HashMap<String, Option<Vec<String>>>, ClientError> {
+        let mut out = std::collections::HashMap::new();
+        for chunk in dedupe(ingredients).chunks(CLASSIFY_CHUNK) {
+            out.extend(self.classify_chunk(chunk)?);
+        }
+        Ok(out)
+    }
+
+    /// Warm the cache for a set of ingredients so later [`Client::is_in_category`]
+    /// calls make no requests: classifies only names not already cached (one
+    /// POST per 200) and loads the known-slug list if needed (one GET). No-op
+    /// without [`Client::cached`], or when the service lacks the batch
+    /// endpoints (calls then use the per-slug `/check` path).
+    pub fn prefetch_categories(&self, ingredients: &[String]) -> Result<(), ClientError> {
+        let Some(cache) = self.batch_cache() else {
+            return Ok(());
+        };
+        if !self.ensure_known_slugs(cache)? {
+            return Ok(());
+        }
+        let missing: Vec<String> = {
+            let have = cache.ingredient_categories.lock().unwrap();
+            dedupe(ingredients)
+                .into_iter()
+                .filter(|i| !have.contains_key(i))
+                .collect()
+        };
+        self.fill_classified(cache, &missing)?;
+        Ok(())
+    }
+
+    /// The cache, when enabled and the batch endpoints haven't been ruled out.
+    fn batch_cache(&self) -> Option<&ClientCache> {
+        let cache = self.cache.as_deref()?;
+        if cache
+            .batch_unsupported
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            None
+        } else {
+            Some(cache)
+        }
+    }
+
+    fn mark_batch_unsupported(cache: &ClientCache) {
+        cache
+            .batch_unsupported
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Load the known-slug set if absent. `Ok(false)` = service lacks the
+    /// endpoint (flag set); callers should use the `/check` path.
+    fn ensure_known_slugs(&self, cache: &ClientCache) -> Result<bool, ClientError> {
+        if cache.known_slugs.lock().unwrap().is_some() {
+            return Ok(true);
+        }
+        match self.fetch_categories() {
+            Ok(slugs) => {
+                *cache.known_slugs.lock().unwrap() = Some(slugs);
+                Ok(true)
+            }
+            Err(ClientError::Server(404 | 405)) => {
+                Self::mark_batch_unsupported(cache);
+                Ok(false)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Classify `names` (deduped, chunked) into the cache. `Ok(false)` = the
+    /// service lacks the endpoint (flag set).
+    fn fill_classified(&self, cache: &ClientCache, names: &[String]) -> Result<bool, ClientError> {
+        for chunk in dedupe(names).chunks(CLASSIFY_CHUNK) {
+            match self.classify_chunk(chunk) {
+                Ok(mut results) => {
+                    let mut map = cache.ingredient_categories.lock().unwrap();
+                    for name in chunk {
+                        let cats = results.remove(name).flatten();
+                        map.insert(name.clone(), cats);
+                    }
+                }
+                Err(ClientError::Server(404 | 405)) => {
+                    Self::mark_batch_unsupported(cache);
+                    return Ok(false);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(true)
+    }
+
+    fn classify_chunk(
+        &self,
+        chunk: &[String],
+    ) -> Result<std::collections::HashMap<String, Option<Vec<String>>>, ClientError> {
+        if chunk.is_empty() {
+            return Ok(Default::default());
+        }
+        let url = format!(
+            "{}/categories/classify",
+            self.base_url.trim_end_matches('/')
+        );
+        let resp = self
+            .auth(
+                self.http
+                    .post(&url)
+                    .json(&serde_json::json!({ "ingredients": chunk })),
+            )
+            .send()?;
+        let status = resp.status();
+        if status.is_success() {
+            #[derive(Deserialize)]
+            struct Envelope {
+                results: std::collections::HashMap<String, Option<Vec<String>>>,
+            }
+            let env: Envelope = resp.json()?;
+            return Ok(env.results);
+        }
+        Err(batch_error(resp, status.as_u16()))
+    }
+
+    /// `GET /categories` → the set of valid slugs.
+    fn fetch_categories(&self) -> Result<std::collections::HashSet<String>, ClientError> {
+        let url = format!("{}/categories", self.base_url.trim_end_matches('/'));
+        let resp = self.auth(self.http.get(&url)).send()?;
+        let status = resp.status();
+        if status.is_success() {
+            #[derive(Deserialize)]
+            struct Item {
+                slug: String,
+            }
+            #[derive(Deserialize)]
+            struct Envelope {
+                categories: Vec<Item>,
+            }
+            let env: Envelope = resp.json()?;
+            return Ok(env.categories.into_iter().map(|c| c.slug).collect());
+        }
+        Err(batch_error(resp, status.as_u16()))
+    }
+
+    /// Single-request membership check via `GET /categories/{slug}/check`.
+    fn is_in_category_check(&self, ingredient: &str, slug: &str) -> Result<bool, ClientError> {
         let cache_key = format!("{ingredient}|{slug}");
         if let Some(cache) = &self.cache {
             if let Some(hit) = cache.category.lock().unwrap().get(&cache_key).copied() {
@@ -441,6 +653,26 @@ impl Client {
         }
         Err(parse_error(resp, status.as_u16()))
     }
+}
+
+/// Order-preserving dedupe of ingredient names.
+fn dedupe(names: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    names
+        .iter()
+        .filter(|n| seen.insert(n.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Error mapping for the batch endpoints: 404/405 mean "older service without
+/// this endpoint" and are kept as `Server(status)` so callers can fall back
+/// (the service's own errors for these routes are never 404/405).
+fn batch_error(resp: reqwest::blocking::Response, raw_status: u16) -> ClientError {
+    if matches!(raw_status, 404 | 405) {
+        return ClientError::Server(raw_status);
+    }
+    parse_error(resp, raw_status)
 }
 
 /// Parse a service RFC 9457 Problem Details body into a `ClientError`,
