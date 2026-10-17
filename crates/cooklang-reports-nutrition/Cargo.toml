@@ -12,7 +12,7 @@ repository.workspace = true
 
 [dependencies]
 minijinja = { workspace = true }
-cookmd-nutrition-client = { path = "../cookmd-nutrition-client", version = "0.1.1" }
+cookmd-nutrition-client = { path = "../cookmd-nutrition-client", version = "0.1.2" }
 cooklang-reports = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
